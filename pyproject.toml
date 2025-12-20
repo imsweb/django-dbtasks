@@ -1,0 +1,37 @@
+[project]
+name = "django-dbtasks"
+version = "0.1.0"
+description = "Database task backend and runner for Django tasks."
+readme = "README.md"
+authors = [
+    { name = "Dan Watson", email = "watsond@imsweb.com" }
+]
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django :: 6",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+]
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "django>=6.0",
+    "psycopg>=3.3.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/imsweb/django-dbtasks"
+
+[build-system]
+requires = ["uv_build>=0.9.2,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "dbtasks"
+
+[tool.ruff.lint]
+extend-select = ["I"]

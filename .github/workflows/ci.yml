@@ -1,0 +1,32 @@
+name: CI
+
+on: [push, pull_request]
+
+env:
+    UV_SYSTEM_PYTHON: 1
+    UV_PYTHON_DOWNLOADS: never
+    UV_PYTHON_PREFERENCE: only-system
+
+jobs:
+    checks:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: astral-sh/ruff-action@v3
+
+    test:
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                django-version: ["6.0"]
+                python-version: ["3.12", "3.13", "3.13t", "3.14", "3.14t"]
+        steps:
+            - uses: actions/checkout@v6
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v6
+              with:
+                  python-version: ${{ matrix.python-version }}
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+            - name: Run Tests (SQLite)
+              run: uv run --with "django~=${{ matrix.django-version }}" manage.py test
