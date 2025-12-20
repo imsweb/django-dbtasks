@@ -1,9 +1,10 @@
 import os
 import platform
 
-from dbtasks.runner import Runner
 from django.core.management import BaseCommand, CommandParser
 from django.tasks import DEFAULT_TASK_BACKEND_ALIAS
+
+from dbtasks.runner import Runner
 
 
 def cpus() -> int:
