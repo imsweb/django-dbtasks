@@ -60,7 +60,7 @@ class ScheduledTask(models.Model):
                 "backend",
                 "queue",
                 "run_after",
-                name="idx_scheduledtask",
+                name="idx_dbtasks_scheduledtask",
             ),
         ]
 
