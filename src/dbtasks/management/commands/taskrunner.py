@@ -15,8 +15,8 @@ class Command(BaseCommand):
     help = "Runs the task runner."
 
     def add_arguments(self, parser: CommandParser):
-        default_cpus = cpus() - 1
-        default_node = platform.node()
+        default_cpus = max(1, cpus() - 1)
+        default_node = platform.node() or "taskrunner"
         parser.add_argument(
             "-w",
             "--workers",
@@ -27,7 +27,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "-i",
             "--worker-id",
-            default=None,
+            default=default_node,
             help=f"Name of the worker node [default=`{default_node}`]",
         )
         parser.add_argument(

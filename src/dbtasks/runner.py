@@ -20,6 +20,7 @@ from django.tasks import (
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
+from .backend import DatabaseBackend
 from .models import ScheduledTask
 from .periodic import Periodic
 
@@ -65,16 +66,25 @@ class Runner:
     ):
         self.workers = workers
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        # In-process tasks.
         self.tasks: dict[str, concurrent.futures.Future] = {}
+        # Keep track of any seen task module, for reloading.
         self.seen_modules: set[str] = set()
+        # Track the number of tasks we've executed.
         self.processed = 0
-        self.worker_id = worker_id or platform.node()
+        self.worker_id = worker_id or platform.node() or type(self).__name__.lower()
+        # How long to wait between scheduling polls.
         self.loop_delay = loop_delay
         self.backend = task_backends[backend]
+        if not isinstance(self.backend, DatabaseBackend):
+            raise ImproperlyConfigured("Backend must be a `DatabaseBackend`")
+        # Signaled when the runner should stop.
         self.stopsign = threading.Event()
+        # Signaled when the queue is empty (no READY tasks).
         self.empty = threading.Event()
         # Covers `self.tasks`, `self.seen_modules`, and `self.processed` access.
         self.lock = threading.Lock()
+        # Allows callers to block on a single task being completed.
         self.waiting: dict[str, threading.Event] = {}
         self.periodic: dict[str, Periodic] = {}
         if retain := self.backend.options.get("retain"):
@@ -163,7 +173,8 @@ class Runner:
 
     def schedule_tasks(self) -> float:
         """
-        Fetches a number of tasks and submits them for execution.
+        Fetches a number of tasks and submits them for execution. Returns how long to
+        delay before the next call to `schedule_tasks`.
         """
         available = max(0, self.workers - len(self.tasks))
         if available <= 0:
@@ -182,10 +193,10 @@ class Runner:
         self.empty.clear()
 
         for t in tasks:
-            # Keep track of task modules we've seen, so we can reload them.
             logger.debug(f"Submitting {t} for execution")
             f = self.executor.submit(run_task, t.task_id)
             with self.lock:
+                # Keep track of task modules we've seen, so we can reload them.
                 self.seen_modules.add(t.task_path.rsplit(".", 1)[0])
                 self.tasks[t.task_id] = f
             f.add_done_callback(
@@ -205,7 +216,7 @@ class Runner:
 
     def init_periodic(self):
         """
-        Removes any outstanding scheduled periodic tasks, and schedules initial runs
+        Removes any outstanding scheduled periodic tasks, and schedules the next runs
         for each.
         """
         # First delete any un-started periodic tasks.
@@ -228,6 +239,9 @@ class Runner:
             logger.info(f"Scheduled {t} for {after}")
 
     def run(self):
+        """
+        Schedules and executes tasks until `stop()` is called.
+        """
         logger.info(f"Starting task runner with {self.workers} workers")
         self.processed = 0
         self.init_periodic()
@@ -263,10 +277,16 @@ class Runner:
         return self.empty.wait(timeout)
 
     def stop(self):
+        """
+        Signals the runner to stop.
+        """
         logger.info("Shutting down task runner")
         self.stopsign.set()
 
     def reload(self):
+        """
+        Reloads all known task modules.
+        """
         with self.lock:
             for mod_path in list(self.seen_modules):
                 try:

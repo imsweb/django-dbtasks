@@ -141,7 +141,8 @@ class Crontab:
         until: datetime | None = None,
     ) -> datetime:
         """
-        Returns the next matching date after the one specified (or after the current date if not specified), and before the specified `until` (or one year after the
+        Returns the next matching date after the one specified (or after the current
+        date if not specified), and before the specified `until` (or one year after the
         intial date if not specified).
         """
         if after is None:

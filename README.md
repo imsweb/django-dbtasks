@@ -14,7 +14,7 @@ TASKS = {
         "OPTIONS": {
             # Set this to True to execute tasks immediately (no need for a runner).
             "immediate": False,
-            # How long to retain ScheduleTasks in the database. Forever if not set.
+            # How long to retain ScheduledTasks in the database. Forever if not set.
             "retain": datetime.timedelta(days=7),
             # Tasks to run periodically.
             "periodic": {
