@@ -3,30 +3,42 @@ import os
 
 INSTALLED_APPS = ["dbtasks", "tests"]
 
-if os.getenv("TEST_ENGINE") == "postgres":
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("POSTGRES_DB", "dbtasks"),
-            "USER": os.getenv("POSTGRES_USER", "postgres"),
-            "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
-            "HOST": os.getenv("POSTGRES_HOST", "localhost"),
-            "PORT": os.getenv("POSTGRES_PORT", 5432),
+match os.getenv("TEST_ENGINE"):
+    case "postgres":
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.getenv("POSTGRES_DB", "dbtasks"),
+                "USER": os.getenv("POSTGRES_USER", "postgres"),
+                "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
+                "HOST": os.getenv("POSTGRES_HOST", "localhost"),
+                "PORT": os.getenv("POSTGRES_PORT", 5432),
+            }
         }
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
-            "TEST": {
-                "NAME": "testdb.sqlite3",
-            },
-            "OPTIONS": {
-                "transaction_mode": "IMMEDIATE",
-            },
+    case "mysql":
+        DATABASES = {
+            "default": {
+                "ENGINE": "mysql.connector.django",
+                "NAME": os.getenv("MYSQL_DB", "dbtasks"),
+                "USER": os.getenv("MYSQL_USER", "root"),
+                "PASSWORD": os.getenv("MYSQL_PASSWORD", ""),
+                "HOST": os.getenv("MYSQL_HOST", "localhost"),
+                "PORT": os.getenv("MYSQL_PORT", 3306),
+            }
         }
-    }
+    case _:
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": ":memory:",
+                "TEST": {
+                    "NAME": "testdb.sqlite3",
+                },
+                "OPTIONS": {
+                    "transaction_mode": "IMMEDIATE",
+                },
+            }
+        }
 
 TASKS = {
     "default": {

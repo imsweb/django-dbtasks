@@ -20,15 +20,25 @@ jobs:
             postgres:
                 image: postgres
                 env:
-                    POSTGRES_DB: dbtasks
                     POSTGRES_PASSWORD: secret
                 options: >-
                     --health-cmd pg_isready
                     --health-interval 10s
                     --health-timeout 5s
-                    --health-retries 5
+                    --health-retries 3
                 ports:
                     - 5432:5432
+            mysql:
+                image: mysql
+                env:
+                    MYSQL_ROOT_PASSWORD: secret
+                options: >-
+                    --health-cmd "mysqladmin ping --host=127.0.0.1"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 3
+                ports:
+                    - 3306:3306
         strategy:
             matrix:
                 django-version: ["6.0"]
@@ -48,3 +58,8 @@ jobs:
               env:
                   TEST_ENGINE: postgres
                   POSTGRES_PASSWORD: secret
+            - name: Run Tests (MySQL)
+              run: uv run --with "django~=${{ matrix.django-version }}" manage.py test
+              env:
+                  TEST_ENGINE: mysql
+                  MYSQL_PASSWORD: secret
