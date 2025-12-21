@@ -2,6 +2,46 @@ import random
 from datetime import datetime, timedelta
 from typing import Iterator
 
+
+class ScheduleExhausted(Exception):
+    pass
+
+
+class Schedule:
+    def match(self, dt: datetime) -> bool:
+        """
+        Returns whether the specified `datetime` matches the schedule.
+        """
+        raise NotImplementedError()
+
+    def next(
+        self,
+        after: datetime | None = None,
+        until: datetime | None = None,
+    ) -> datetime:
+        """
+        Returns the next scheduled `datetime` between `after` and `until`.
+        """
+        raise NotImplementedError()
+
+    def dates(
+        self,
+        after: datetime | None = None,
+        until: datetime | None = None,
+    ) -> Iterator[datetime]:
+        """
+        Yields each scheduled `datetime` between `after` and `until`.
+        """
+        d = after
+        while True:
+            try:
+                d = self.next(after=d, until=until)
+                yield d
+            except ScheduleExhausted:
+                break
+
+
+# Python's `isoweekday` uses Sunday=7
 WEEKDAYS = {
     "mon": 1,
     "tue": 2,
@@ -32,16 +72,13 @@ class CrontabParseError(Exception):
     pass
 
 
-class CrontabExhausted(Exception):
-    pass
-
-
 class CrontabParser:
     def __init__(
         self,
         min_value: int,
         max_value: int,
         names: dict[str, int] | None = None,
+        replace: dict[int, int] | None = None,
     ):
         self.min_value = min_value
         self.max_value = max_value
@@ -49,6 +86,7 @@ class CrontabParser:
             key[:3].lower(): self._range_check(value)
             for key, value in (names or {}).items()
         }
+        self.replace = replace or {}
 
     def _range_check(self, num: int) -> int:
         if num < self.min_value or num > self.max_value:
@@ -85,6 +123,10 @@ class CrontabParser:
         values: set[int] = set()
         for part in spec.split(","):
             values.update(self.parse_part(part))
+        for num, repl in self.replace.items():
+            if num in values:
+                values.discard(num)
+                values.add(repl)
         return list(sorted(values))
 
 
@@ -92,10 +134,10 @@ minute = CrontabParser(0, 59)
 hour = CrontabParser(0, 23)
 day = CrontabParser(1, 31)
 month = CrontabParser(1, 12, names=MONTHS)
-weekday = CrontabParser(0, 7, names=WEEKDAYS)
+weekday = CrontabParser(0, 7, names=WEEKDAYS, replace={0: 7})
 
 
-class Crontab:
+class Crontab(Schedule):
     def __init__(self, spec: str):
         parts = spec.split(None)
         if len(parts) != 5:
@@ -153,20 +195,4 @@ class Crontab:
             after += timedelta(minutes=1)
             if self.match(after) and (after < until):
                 return after.replace(second=0, microsecond=0)
-        raise CrontabExhausted(f"Could not find matching date before {until}")
-
-    def dates(
-        self,
-        after: datetime | None = None,
-        until: datetime | None = None,
-    ) -> Iterator[datetime]:
-        """
-        Yields each date between `after` and `until`.
-        """
-        d = after
-        while True:
-            try:
-                d = self.next(after=d, until=until)
-                yield d
-            except CrontabExhausted:
-                break
+        raise ScheduleExhausted(f"Could not find matching date before {until}")

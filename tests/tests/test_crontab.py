@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, time
 
-from dbtasks.crontab import Crontab, hour, minute, month
+from dbtasks.schedule import Crontab, hour, minute, month, weekday
 
 
 class CrontabTests(unittest.TestCase):
@@ -14,6 +14,7 @@ class CrontabTests(unittest.TestCase):
         self.assertEqual(hour.parse("*/23"), [0, 23])
         self.assertEqual(month.parse("oct,february,jun"), [2, 6, 10])
         self.assertEqual(month.parse("jan-jun/2"), [1, 3, 5])
+        self.assertEqual(weekday.parse("0-2,5"), [1, 2, 5, 7])
 
     def test_crontab(self):
         # 4:30am on the 1st and 15th of each month
