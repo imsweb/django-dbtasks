@@ -43,7 +43,6 @@ def run_task(pk: str) -> TaskResultStatus:
         # Seems like this might be a welcome addition:
         # https://discuss.python.org/t/adding-finalizer-to-the-threading-library/54186
         connection.close()
-        pass
 
 
 @task
@@ -63,6 +62,7 @@ class Runner:
         worker_id: str | None = None,
         backend: str = DEFAULT_TASK_BACKEND_ALIAS,
         loop_delay: float = 0.5,
+        init_periodic: bool = True,
     ):
         self.workers = workers
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
@@ -78,15 +78,20 @@ class Runner:
         self.backend = task_backends[backend]
         if not isinstance(self.backend, DatabaseBackend):
             raise ImproperlyConfigured("Backend must be a `DatabaseBackend`")
+        # Signaled when the runner is ready and processing tasks.
+        self.ready = threading.Event()
         # Signaled when the runner should stop.
         self.stopsign = threading.Event()
-        # Signaled when the queue is empty (no READY tasks).
+        # Signaled when the runner is finished stopping.
+        self.finished = threading.Event()
+        # Signaled each time the queue is empty (no READY tasks).
         self.empty = threading.Event()
         # Covers `self.tasks`, `self.seen_modules`, and `self.processed` access.
         self.lock = threading.Lock()
         # Allows callers to block on a single task being completed.
         self.waiting: dict[str, threading.Event] = {}
         self.periodic: dict[str, Periodic] = {}
+        self.should_init_periodic = init_periodic
         if retain := self.backend.options.get("retain"):
             # If the task backend specifies a retention period, schedule a periodic task
             # to delete finished tasks older than that period.
@@ -156,20 +161,50 @@ class Runner:
         except Exception as ex:
             logger.info(f"Task {task_path} ({pk}) raised {ex}")
 
+        if was_periodic and (schedule := self.periodic.get(task_path)):
+            after = timezone.make_aware(schedule.next())
+            # Since this can run in the task's thread, we need to clean up the
+            # connection afterwards since it may not be closed at the end of `run`.
+            with connection.temporary_connection():
+                t = ScheduledTask.objects.create(
+                    task_path=task_path,
+                    args=schedule.args,
+                    kwargs=schedule.kwargs,
+                    backend=self.backend.alias,
+                    run_after=after,
+                    periodic=True,
+                )
+                logger.info(f"Re-scheduled {t} for {after}")
+
+        # If anyone is waiting on this task, wake them up.
         if event := self.waiting.get(pk):
             event.set()
 
-        if was_periodic and (schedule := self.periodic.get(task_path)):
-            after = timezone.make_aware(schedule.next())
-            t = ScheduledTask.objects.create(
-                task_path=task_path,
-                args=schedule.args,
-                kwargs=schedule.kwargs,
-                backend=self.backend.alias,
-                run_after=after,
-                periodic=True,
-            )
-            logger.info(f"Re-scheduled {t} for {after}")
+    def submit_task(self, task: ScheduledTask, start: bool = True) -> TaskResult:
+        """
+        Submits a `ScheduledTask` for execution, marking it as RUNNING and setting its
+        `started_at` timestamp if `start=True`.
+        """
+        if start:
+            task.status = TaskResultStatus.RUNNING
+            task.started_at = timezone.now()
+            task.worker_ids.append(self.worker_id)
+            task.save(update_fields=["status", "started_at", "worker_ids"])
+        logger.debug(f"Submitting {task} for execution")
+        f = self.executor.submit(run_task, task.task_id)
+        with self.lock:
+            # Keep track of task modules we've seen, so we can reload them.
+            self.seen_modules.add(task.task_path.rsplit(".", 1)[0])
+            self.tasks[task.task_id] = f
+        f.add_done_callback(
+            functools.partial(
+                self.task_done,
+                task.task_id,
+                task.task_path,
+                task.periodic,
+            ),
+        )
+        return task.result
 
     def schedule_tasks(self) -> float:
         """
@@ -193,20 +228,8 @@ class Runner:
         self.empty.clear()
 
         for t in tasks:
-            logger.debug(f"Submitting {t} for execution")
-            f = self.executor.submit(run_task, t.task_id)
-            with self.lock:
-                # Keep track of task modules we've seen, so we can reload them.
-                self.seen_modules.add(t.task_path.rsplit(".", 1)[0])
-                self.tasks[t.task_id] = f
-            f.add_done_callback(
-                functools.partial(
-                    self.task_done,
-                    t.task_id,
-                    t.task_path,
-                    t.periodic,
-                ),
-            )
+            # get_tasks starts all of the returned tasks atomically, no need to here.
+            self.submit_task(t, start=False)
 
         if len(tasks) >= available:
             # We got a full batch, try again immediately.
@@ -244,7 +267,12 @@ class Runner:
         """
         logger.info(f"Starting task runner with {self.workers} workers")
         self.processed = 0
-        self.init_periodic()
+        if self.should_init_periodic:
+            with transaction.atomic(durable=True):
+                self.init_periodic()
+                transaction.on_commit(self.ready.set)
+        else:
+            self.ready.set()
         try:
             while not self.stopsign.is_set():
                 delay = self.schedule_tasks()
@@ -254,6 +282,7 @@ class Runner:
         finally:
             self.executor.shutdown()
             connection.close()
+        self.finished.set()
 
     def wait_for(self, result: TaskResult, timeout: float | None = None) -> bool:
         """

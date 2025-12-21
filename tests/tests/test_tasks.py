@@ -1,6 +1,8 @@
 from django.tasks import TaskResult, TaskResultStatus
 
-from ..tasks import send_mail
+from dbtasks.models import ScheduledTask
+
+from ..tasks import maintenance, send_mail
 from ..utils import LoggedRunnerTestCase
 
 
@@ -23,3 +25,41 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
         self.runner.wait()
         self.assertEqual(self.runner.processed, 100)
         self.assertEqual(set(self.task_logs["INFO"]), expected)
+
+    def test_periodic(self):
+        self.assertIn(maintenance.module_path, self.runner.periodic)
+        self.runner.init_periodic()
+        first = ScheduledTask.objects.get(
+            task_path=maintenance.module_path,
+            status=TaskResultStatus.READY,
+            periodic=True,
+        )
+        # Run the initial scheduled task manually.
+        result = self.runner.submit_task(first)
+        self.assertTrue(self.runner.wait_for(result))
+        first.refresh_from_db()
+        self.assertEqual(result.status, TaskResultStatus.SUCCESSFUL)
+        self.assertEqual(first.status, TaskResultStatus.SUCCESSFUL)
+        # Make sure a second periodic task got scheduled when the first completed.
+        second = ScheduledTask.objects.get(
+            task_path=maintenance.module_path,
+            status=TaskResultStatus.READY,
+            periodic=True,
+        )
+        self.assertNotEqual(first.id, second.id)
+        self.assertGreater(second.enqueued_at, first.enqueued_at)
+        # Now run the maintenance task manually, not periodically.
+        result: TaskResult = maintenance.enqueue()
+        self.assertTrue(self.runner.wait_for(result))
+        manual = ScheduledTask.objects.get(pk=result.id)
+        # Make sure the manual run was not marked periodic, and that no new tasks were
+        # automatically scheduled afterwards.
+        self.assertFalse(manual.periodic)
+        self.assertEqual(
+            ScheduledTask.objects.filter(
+                task_path=maintenance.module_path, status=TaskResultStatus.READY
+            ).count(),
+            1,
+        )
+        second.refresh_from_db()
+        self.assertEqual(second.status, TaskResultStatus.READY)

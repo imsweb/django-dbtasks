@@ -1,17 +1,24 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable
 
-from .schedule import Crontab, Schedule
+from .schedule import Crontab, Every, Schedule
 
 
 class Periodic:
+    schedule: Schedule
+
     def __init__(
         self,
-        spec: Schedule | str,
+        spec: Schedule | str | int | timedelta,
         args: list | tuple | Callable[[], list | tuple] | None = None,
         kwargs: dict | Callable[[], dict] | None = None,
     ):
-        self.schedule = spec if isinstance(spec, Schedule) else Crontab(spec)
+        if isinstance(spec, Schedule):
+            self.schedule = spec
+        elif isinstance(spec, str) and len(spec.split()) == 5:
+            self.schedule = Crontab(spec)
+        else:
+            self.schedule = Every(spec)
         self._args = args
         self._kwargs = kwargs
 

@@ -9,3 +9,8 @@ logger = logging.getLogger(__name__)
 def send_mail(to: str, message: str):
     logger.info(f"Sending mail to {to}: {message}")
     return {"sent": True}
+
+
+@task
+def maintenance():
+    pass

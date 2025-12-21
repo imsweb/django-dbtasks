@@ -1,4 +1,3 @@
-import datetime
 import os
 
 INSTALLED_APPS = ["dbtasks", "tests"]
@@ -45,8 +44,9 @@ TASKS = {
         "BACKEND": "dbtasks.backend.DatabaseBackend",
         "OPTIONS": {
             "immediate": False,
-            "retain": datetime.timedelta(days=7),
-            "periodic": {},
+            "periodic": {
+                "tests.tasks.maintenance": "1h",
+            },
         },
     },
 }
