@@ -1,4 +1,5 @@
 import random
+import re
 from datetime import datetime, timedelta
 from typing import Iterator
 
@@ -14,15 +15,29 @@ class Schedule:
         """
         raise NotImplementedError()
 
+    def first(self, after: datetime) -> datetime | None:
+        """
+        Returns the first scheduled `datetime` after the specified `datetime`, or `None`
+        if one cannot be found. May also raise `ScheduleExhausted`.
+        """
+        raise NotImplementedError()
+
     def next(
         self,
         after: datetime | None = None,
         until: datetime | None = None,
     ) -> datetime:
         """
-        Returns the next scheduled `datetime` between `after` and `until`.
+        Returns the next matching `datetime` after the one specified (or after the
+        current date if not specified), and before the specified `until` (if specified).
+        Raises `ScheduleExhausted` if unable to find a matching date.
         """
-        raise NotImplementedError()
+        if after is None:
+            after = datetime.now()
+        if d := self.first(after):
+            if until is None or d < until:
+                return d
+        raise ScheduleExhausted("Could not find next matching date")
 
     def dates(
         self,
@@ -155,9 +170,6 @@ class Crontab(Schedule):
         return f"crontab({self.spec!r})"
 
     def match(self, dt: datetime) -> bool:
-        """
-        Returns whether the specified datetime matches this crontab spec.
-        """
         if dt.minute not in self.minutes:
             return False
         if dt.hour not in self.hours:
@@ -177,22 +189,76 @@ class Crontab(Schedule):
                 return False
         return True
 
-    def next(
-        self,
-        after: datetime | None = None,
-        until: datetime | None = None,
-    ) -> datetime:
-        """
-        Returns the next matching date after the one specified (or after the current
-        date if not specified), and before the specified `until` (or one year after the
-        intial date if not specified).
-        """
-        if after is None:
-            after = datetime.now()
-        if until is None:
-            until = after.replace(year=after.year + 1)
-        while after < until:
+    def first(self, after: datetime) -> datetime | None:
+        # Crontabs never schedule more than a year out.
+        limit = after + timedelta(days=365)
+        while after < limit:
             after += timedelta(minutes=1)
-            if self.match(after) and (after < until):
+            if self.match(after):
                 return after.replace(second=0, microsecond=0)
-        raise ScheduleExhausted(f"Could not find matching date before {until}")
+
+
+class Duration(timedelta):
+    """
+    A `datetime.timedelta` subclass that can be constructed with a duration string of
+    the format `WwDdHhMmSs` where the capital letters are integers and the lowercase
+    letters are duration specifiers (week/day/hour/minute/second). Also adds a
+    `duration_string` method for converting back to this format.
+    """
+
+    SPECS = {
+        "w": 604800,
+        "d": 86400,
+        "h": 3600,
+        "m": 60,
+        "s": 1,
+    }
+
+    SPLITTER = re.compile("([{}])".format("".join(SPECS)))
+
+    def __new__(cls, value: str | int | timedelta):
+        if isinstance(value, timedelta):
+            return timedelta.__new__(cls, seconds=value.total_seconds())
+        if isinstance(value, int):
+            return timedelta.__new__(cls, seconds=value)
+        if value.isdigit():
+            return timedelta.__new__(cls, seconds=int(value))
+        parts = Duration.SPLITTER.split(value.lower().strip())
+        seconds = 0
+        for pair in zip(parts[::2], parts[1::2]):
+            if pair:
+                seconds += int(pair[0]) * Duration.SPECS[pair[1]]
+        return timedelta.__new__(cls, seconds=seconds)
+
+    def duration_string(self):
+        seconds = self.total_seconds()
+        duration: list[str] = []
+        for fmt, sec in Duration.SPECS.items():
+            num = int(seconds // sec)
+            if num > 0:
+                duration.append("{}{}".format(num, fmt))
+                seconds -= num * sec
+        return "".join(duration)
+
+
+class Every(Schedule):
+    def __init__(self, period: str | int | timedelta, start: datetime | None = None):
+        self.period = Duration(period)
+        self.period_seconds = int(self.period.total_seconds())
+        self.start = start or datetime.now()
+        self.start_timestamp = int(self.start.timestamp())
+
+    def __repr__(self):
+        return "period({})".format(repr(self.period.duration_string()))
+
+    def match(self, dt: datetime) -> bool:
+        return (int(dt.timestamp()) - self.start_timestamp) % self.period_seconds == 0
+
+    def first(self, after: datetime) -> datetime | None:
+        periods = (
+            (int(after.timestamp()) - self.start_timestamp) // self.period_seconds
+        ) + 1
+        # Using fromtimestamp will skip non-existent times due to DST.
+        return datetime.fromtimestamp(
+            self.start_timestamp + (self.period_seconds * periods)
+        )

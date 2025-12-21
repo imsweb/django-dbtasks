@@ -65,3 +65,5 @@ LOGGING = {
         "level": "DEBUG",
     },
 }
+
+TIME_ZONE = "America/New_York"
