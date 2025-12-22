@@ -41,6 +41,12 @@ class Command(BaseCommand):
             default=0.5,
             help="Loop delay [default=0.5]",
         )
+        parser.add_argument(
+            "--no-periodic",
+            action="store_false",
+            default=True,
+            dest="periodic",
+        )
 
     def handle(self, *args, **options):
         Runner(
@@ -48,4 +54,5 @@ class Command(BaseCommand):
             worker_id=options["worker_id"],
             backend=options["backend"],
             loop_delay=options["delay"],
+            init_periodic=options["periodic"],
         ).run()

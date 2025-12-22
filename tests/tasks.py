@@ -14,3 +14,8 @@ def send_mail(to: str, message: str):
 @task
 def maintenance():
     pass
+
+
+@task
+def kaboom(msg: str):
+    raise ValueError(msg)

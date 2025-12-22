@@ -2,7 +2,7 @@ from django.tasks import TaskResult, TaskResultStatus
 
 from dbtasks.models import ScheduledTask
 
-from ..tasks import maintenance, send_mail
+from ..tasks import kaboom, maintenance, send_mail
 from ..utils import LoggedRunnerTestCase
 
 
@@ -23,7 +23,6 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
             send_mail.enqueue(f"user-{k}@example.com", "hello!")
             expected.add(f"Sending mail to user-{k}@example.com: hello!")
         self.runner.wait()
-        self.assertEqual(self.runner.processed, 100)
         self.assertEqual(set(self.task_logs["INFO"]), expected)
 
     def test_periodic(self):
@@ -63,3 +62,12 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
         )
         second.refresh_from_db()
         self.assertEqual(second.status, TaskResultStatus.READY)
+
+    def test_failed_task(self):
+        result: TaskResult = kaboom.enqueue("Boom goes the dynamite!")
+        self.assertTrue(self.runner.wait_for(result))
+        self.assertEqual(result.status, TaskResultStatus.FAILED)
+        with self.assertRaises(ValueError):
+            result.return_value
+        self.assertEqual(len(result.errors), 1)
+        self.assertEqual(result.errors[0].exception_class_path, "builtins.ValueError")

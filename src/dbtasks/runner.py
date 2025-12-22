@@ -17,22 +17,23 @@ from django.tasks import (
     task,
     task_backends,
 )
+from django.tasks.signals import task_finished, task_started
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
 from .backend import DatabaseBackend
 from .models import ScheduledTask
 from .periodic import Periodic
+from .schedule import Duration
 
 logger = logging.getLogger(__name__)
 
 
-def run_task(pk: str) -> TaskResultStatus:
+def run_task(task: ScheduledTask) -> TaskResultStatus:
     """
     Fetches, runs, and updates a `ScheduledTask`. Runs in a worker thread.
     """
     try:
-        task = ScheduledTask.objects.get(pk=pk)
         logger.info(f"Running {task}")
         return task.run_and_update()
     finally:
@@ -95,15 +96,7 @@ class Runner:
         if retain := self.backend.options.get("retain"):
             # If the task backend specifies a retention period, schedule a periodic task
             # to delete finished tasks older than that period.
-            retain_secs = 0
-            if isinstance(retain, int):
-                retain_secs = retain
-            elif isinstance(retain, datetime.timedelta):
-                retain_secs = int(retain.total_seconds())
-            else:
-                raise ImproperlyConfigured(
-                    "Backend `retain` option should be an `int` or `timedelta`"
-                )
+            retain_secs = int(Duration(retain).total_seconds())
             self.periodic[f"{__name__}.cleanup"] = Periodic(
                 "~ * * * *", args=[retain_secs]
             )
@@ -141,9 +134,7 @@ class Runner:
 
     def task_done(
         self,
-        pk: str,
-        task_path: str,
-        was_periodic: bool,
+        task: ScheduledTask,
         fut: concurrent.futures.Future,
     ):
         """
@@ -153,21 +144,21 @@ class Runner:
         """
         with self.lock:
             self.processed += 1
-            del self.tasks[pk]
+            del self.tasks[task.task_id]
 
         try:
             status = fut.result()
-            logger.info(f"Task {task_path} ({pk}) finished with status {status}")
+            logger.info(f"Task {task} finished with status {status}")
         except Exception as ex:
-            logger.info(f"Task {task_path} ({pk}) raised {ex}")
+            logger.info(f"Task {task} raised {ex}")
 
-        if was_periodic and (schedule := self.periodic.get(task_path)):
+        if task.periodic and (schedule := self.periodic.get(task.task_path)):
             after = timezone.make_aware(schedule.next())
             # Since this can run in the task's thread, we need to clean up the
             # connection afterwards since it may not be closed at the end of `run`.
             with connection.temporary_connection():
                 t = ScheduledTask.objects.create(
-                    task_path=task_path,
+                    task_path=task.task_path,
                     args=schedule.args,
                     kwargs=schedule.kwargs,
                     backend=self.backend.alias,
@@ -176,14 +167,19 @@ class Runner:
                 )
                 logger.info(f"Re-scheduled {t} for {after}")
 
+        task_finished.send(type(self.backend), task_result=task.result)
+
         # If anyone is waiting on this task, wake them up.
-        if event := self.waiting.get(pk):
+        if event := self.waiting.get(task.task_id):
             event.set()
 
     def submit_task(self, task: ScheduledTask, start: bool = True) -> TaskResult:
         """
         Submits a `ScheduledTask` for execution, marking it as RUNNING and setting its
         `started_at` timestamp if `start=True`.
+
+        Note that `task` is passed directly to a separate thread, so callers should not
+        modify it until after the task is complete.
         """
         if start:
             task.status = TaskResultStatus.RUNNING
@@ -191,19 +187,13 @@ class Runner:
             task.worker_ids.append(self.worker_id)
             task.save(update_fields=["status", "started_at", "worker_ids"])
         logger.debug(f"Submitting {task} for execution")
-        f = self.executor.submit(run_task, task.task_id)
+        task_started.send(type(self.backend), task_result=task.result)
+        f = self.executor.submit(run_task, task)
         with self.lock:
             # Keep track of task modules we've seen, so we can reload them.
             self.seen_modules.add(task.task_path.rsplit(".", 1)[0])
             self.tasks[task.task_id] = f
-        f.add_done_callback(
-            functools.partial(
-                self.task_done,
-                task.task_id,
-                task.task_path,
-                task.periodic,
-            ),
-        )
+        f.add_done_callback(functools.partial(self.task_done, task))
         return task.result
 
     def schedule_tasks(self) -> float:
@@ -242,13 +232,12 @@ class Runner:
         Removes any outstanding scheduled periodic tasks, and schedules the next runs
         for each.
         """
-        # First delete any un-started periodic tasks.
         ScheduledTask.objects.filter(
             status=TaskResultStatus.READY,
             periodic=True,
         ).delete()
-        # Then schedule the next run of each periodic task. Subsequent runs will be
-        # scheduled on completion.
+        # Schedule the next run of each periodic task. Subsequent runs will be scheduled
+        # on completion.
         for task_path, schedule in self.periodic.items():
             after = timezone.make_aware(schedule.next())
             t = ScheduledTask.objects.create(
@@ -267,6 +256,7 @@ class Runner:
         """
         logger.info(f"Starting task runner with {self.workers} workers")
         self.processed = 0
+        self.stopsign.clear()
         if self.should_init_periodic:
             with transaction.atomic(durable=True):
                 self.init_periodic()
@@ -282,6 +272,7 @@ class Runner:
         finally:
             self.executor.shutdown()
             connection.close()
+        self.ready.clear()
         self.finished.set()
 
     def wait_for(self, result: TaskResult, timeout: float | None = None) -> bool:
@@ -290,7 +281,7 @@ class Runner:
         """
         if result.status in (TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED):
             return True
-        logger.info(f"Waiting for {result.id}...")
+        logger.debug(f"Waiting for {result.id}...")
         event = threading.Event()
         self.waiting[result.id] = event
         success = event.wait(timeout)
