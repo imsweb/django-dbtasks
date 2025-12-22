@@ -93,7 +93,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "addrport",
             nargs="?",
-            default="127.0.0.1:8000",
+            default="",
             help="Optional port number, or ipaddr:port [default=`127.0.0.1:8000`]",
         )
 
@@ -122,18 +122,26 @@ class Command(BaseCommand):
                 init_periodic=options["periodic"],
             )
 
-        # With no argument, bind to 127.0.0.1 to match runserver, gunicorn, etc.
-        # If specifying a port (but no address), bind to 0.0.0.0.
+        # With no argument, bind to 127.0.0.1:8000 to match runserver, gunicorn, etc.
         address = "127.0.0.1"
         port = 8000
+        # Default to the GRANIAN_ environment variables if set.
+        if p := os.getenv("GRANIAN_PORT"):
+            # Match gunicorn's behavior of binding to 0.0.0.0 when port is in the env.
+            address = "0.0.0.0"
+            port = int(p)
+        if a := os.getenv("GRANIAN_HOST"):
+            address = a
+        # Then check to see if an address/port was specified on the command line.
         if options["addrport"].isdigit():
+            # If specifying a port (but no address), bind to 0.0.0.0.
             address = "0.0.0.0"
             port = int(options["addrport"])
         elif ":" in options["addrport"]:
             a, p = options["addrport"].rsplit(":", 1)
             address = a or "0.0.0.0"
             port = int(p)
-        else:
+        elif options["addrport"]:
             address = options["addrport"]
 
         reload_paths = []
