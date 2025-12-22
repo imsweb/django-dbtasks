@@ -20,7 +20,27 @@ class DatabaseBackend(BaseTaskBackend):
 
     @property
     def immediate(self):
+        """
+        Whether tasks should be executed immediately by the backend. Useful when testing
+        without having to run a worker.
+        """
         return bool(self.options.get("immediate", False))
+
+    @property
+    def send_signals(self):
+        """
+        Whether the `task_enqueued`, `task_started`, and `task_finished` should be sent
+        when executing tasks with this backend. Defaults to `True`.
+        """
+        return bool(self.options.get("signals", True))
+
+    @property
+    def worker_id(self):
+        """
+        The `worker_id` to record when tasks are run by the backend itself (i.e. when
+        `immediate=True`).
+        """
+        return f"{type(self).__module__}.{type(self).__qualname__}"
 
     def validate_task(self, task):
         super().validate_task(task)
@@ -41,18 +61,24 @@ class DatabaseBackend(BaseTaskBackend):
         )
 
         logger.debug(f"Enqueued {scheduled}")
-        task_enqueued.send(type(self), task_result=scheduled.result)
+        if self.send_signals:
+            task_enqueued.send(type(self), task_result=scheduled.result)
 
         if self.immediate:
             logger.info(f"Running {scheduled} IMMEDIATELY")
 
             scheduled.status = TaskResultStatus.RUNNING
             scheduled.started_at = timezone.now()
-            scheduled.save(update_fields=["status", "started_at"])
-            task_started.send(type(self), task_result=scheduled.result)
+            scheduled.worker_ids.append(self.worker_id)
+            scheduled.save(update_fields=["status", "started_at", "worker_ids"])
+
+            if self.send_signals:
+                task_started.send(type(self), task_result=scheduled.result)
 
             scheduled.run_and_update()
-            task_finished.send(type(self), task_result=scheduled.result)
+
+            if self.send_signals:
+                task_finished.send(type(self), task_result=scheduled.result)
 
         return scheduled.result
 

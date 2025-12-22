@@ -57,6 +57,8 @@ def cleanup(retention: int):
 
 
 class Runner:
+    backend: DatabaseBackend
+
     def __init__(
         self,
         workers: int = 4,
@@ -167,7 +169,8 @@ class Runner:
                 )
                 logger.info(f"Re-scheduled {t} for {after}")
 
-        task_finished.send(type(self.backend), task_result=task.result)
+        if self.backend.send_signals:
+            task_finished.send(type(self.backend), task_result=task.result)
 
         # If anyone is waiting on this task, wake them up.
         if event := self.waiting.get(task.task_id):
@@ -187,7 +190,8 @@ class Runner:
             task.worker_ids.append(self.worker_id)
             task.save(update_fields=["status", "started_at", "worker_ids"])
         logger.debug(f"Submitting {task} for execution")
-        task_started.send(type(self.backend), task_result=task.result)
+        if self.backend.send_signals:
+            task_started.send(type(self.backend), task_result=task.result)
         f = self.executor.submit(run_task, task)
         with self.lock:
             # Keep track of task modules we've seen, so we can reload them.

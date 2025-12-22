@@ -2,6 +2,10 @@
 
 Database backend and runner for [Django tasks](https://docs.djangoproject.com/en/dev/topics/tasks/) (new in 6.0).
 
+`django-dbtasks` is tested on PostgreSQL, SQLite, and MySQL for versions of Python back to 3.12, including the free-threading builds.
+
+_Note when using SQLite it is recommended to set `OPTIONS["transaction_mode"] = "IMMEDIATE"` - see https://forum.djangoproject.com/t/sqlite-and-database-is-locked-error/26994 for more information._
+
 
 ## Quickstart
 
@@ -14,6 +18,8 @@ TASKS = {
         "OPTIONS": {
             # Set this to True to execute tasks immediately (no need for a runner).
             "immediate": False,
+            # Whether to send `task_enqueued`, `task_started`, and `task_finished`.
+            "signals": True,
             # How long to retain ScheduledTasks in the database. Forever if not set.
             "retain": datetime.timedelta(days=7),
             # Tasks to run periodically.
