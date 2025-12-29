@@ -61,7 +61,7 @@ class Command(BaseCommand):
             "--tasks",
             nargs="?",
             type=int,
-            const=cpus() // 2,
+            const=default_task_threads,
             default=0,
             help=f"Number of task runner threads [default={default_task_threads}]",
         )
@@ -89,6 +89,19 @@ class Command(BaseCommand):
             default=True,
             dest="periodic",
             help="Do not schedule periodic tasks",
+        )
+        parser.add_argument(
+            "-a",
+            "--address",
+            default=None,
+            help="IP address to bind to [default=`127.0.0.1`]",
+        )
+        parser.add_argument(
+            "-p",
+            "--port",
+            type=int,
+            default=None,
+            help="Port to listen on [default=8000]",
         )
         parser.add_argument(
             "addrport",
@@ -132,6 +145,7 @@ class Command(BaseCommand):
             port = int(p)
         if a := os.getenv("GRANIAN_HOST"):
             address = a
+
         # Then check to see if an address/port was specified on the command line.
         if options["addrport"].isdigit():
             # If specifying a port (but no address), bind to 0.0.0.0.
@@ -143,6 +157,13 @@ class Command(BaseCommand):
             port = int(p)
         elif options["addrport"]:
             address = options["addrport"]
+
+        # Finally, override with --address/--port if specified. Necessary because
+        # `serve -k 9000` will start 9000 workers instead of binding to port 9000.
+        if a := options["address"]:
+            address = a
+        if p := options["port"]:
+            port = p
 
         reload_paths = []
         if path := options["reload"].strip():
