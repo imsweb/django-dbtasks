@@ -44,6 +44,9 @@ TASKS = {
         "BACKEND": "dbtasks.backend.DatabaseBackend",
         "OPTIONS": {
             "immediate": False,
+            "retain": {
+                "tests.tasks.send_mail": 0,
+            },
             "periodic": {
                 "tests.tasks.maintenance": "1h",
             },

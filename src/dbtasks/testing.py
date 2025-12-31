@@ -22,6 +22,8 @@ class RunnerTestCase(TransactionTestCase):
             loop_delay=0.01,
             init_periodic=False,
         )
+        # Don't deleted completed tasks - tests can call `self.runner.delete_tasks()`.
+        cls.runner.should_delete_tasks = False
         threading.Thread(target=cls.runner.run).start()
         cls.runner.ready.wait()
 

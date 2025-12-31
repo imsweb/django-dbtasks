@@ -1,5 +1,4 @@
 import concurrent.futures
-import datetime
 import functools
 import importlib
 import logging
@@ -14,7 +13,6 @@ from django.tasks import (
     DEFAULT_TASK_BACKEND_ALIAS,
     TaskResult,
     TaskResultStatus,
-    task,
     task_backends,
 )
 from django.tasks.signals import task_finished, task_started
@@ -24,7 +22,6 @@ from django.utils.module_loading import import_string
 from .backend import DatabaseBackend
 from .models import ScheduledTask
 from .periodic import Periodic
-from .schedule import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +43,6 @@ def run_task(task: ScheduledTask) -> TaskResultStatus:
         connection.close()
 
 
-@task
-def cleanup(retention: int):
-    before = timezone.now() - datetime.timedelta(seconds=retention)
-    logger.info(f"Cleaning up scheduled tasks before {before}")
-    return ScheduledTask.objects.filter(
-        status__in=[TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED],
-        finished_at__lt=before,
-    ).delete()
-
-
 class Runner:
     backend: DatabaseBackend
 
@@ -64,7 +51,7 @@ class Runner:
         workers: int = 4,
         worker_id: str | None = None,
         backend: str = DEFAULT_TASK_BACKEND_ALIAS,
-        loop_delay: float = 0.5,
+        loop_delay: float = 1.0,
         init_periodic: bool = True,
     ):
         self.workers = workers
@@ -95,13 +82,7 @@ class Runner:
         self.waiting: dict[str, threading.Event] = {}
         self.periodic: dict[str, Periodic] = {}
         self.should_init_periodic = init_periodic
-        if retain := self.backend.options.get("retain"):
-            # If the task backend specifies a retention period, schedule a periodic task
-            # to delete finished tasks older than that period.
-            retain_secs = int(Duration(retain).total_seconds())
-            self.periodic[f"{__name__}.cleanup"] = Periodic(
-                "~ * * * *", args=[retain_secs]
-            )
+        self.should_delete_tasks = True
         for task_path, schedule in self.backend.options.get("periodic", {}).items():
             self.periodic[task_path] = (
                 schedule if isinstance(schedule, Periodic) else Periodic(schedule)
@@ -120,6 +101,7 @@ class Runner:
                 ScheduledTask.objects.filter(
                     Q(run_after__isnull=True) | Q(run_after__lte=now),
                     status=TaskResultStatus.READY,
+                    # TODO: allow runner to specify which backend/queues to process
                     backend=self.backend.alias,
                     queue__in=self.backend.queues,
                 )
@@ -231,6 +213,18 @@ class Runner:
 
         return self.loop_delay
 
+    def delete_tasks(self):
+        """
+        Deletes any finished tasks scheduled for deletion before now.
+        """
+        return ScheduledTask.objects.filter(
+            delete_after__lt=timezone.now(),
+            status__in=[TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED],
+            # TODO: allow runner to specify which backend/queues to process
+            backend=self.backend.alias,
+            queue__in=self.backend.queues,
+        ).delete()
+
     def init_periodic(self):
         """
         Removes any outstanding scheduled periodic tasks, and schedules the next runs
@@ -269,8 +263,12 @@ class Runner:
             self.ready.set()
         try:
             while not self.stopsign.is_set():
-                delay = self.schedule_tasks()
-                time.sleep(delay)
+                if delay := self.schedule_tasks():
+                    time.sleep(delay)
+                    # Only process deletes when not running through full batches (and
+                    # when the flag is set - mostly for testing).
+                    if self.should_delete_tasks:
+                        self.delete_tasks()
         except KeyboardInterrupt:
             pass
         finally:

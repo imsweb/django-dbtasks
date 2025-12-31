@@ -1,6 +1,6 @@
 [project]
 name = "django-dbtasks"
-version = "0.3.2"
+version = "0.4.0"
 description = "Database task backend and runner for Django tasks."
 readme = "README.md"
 authors = [

@@ -38,8 +38,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--delay",
             type=float,
-            default=0.5,
-            help="Loop delay [default=0.5]",
+            default=1.0,
+            help="Loop delay [default=1.0]",
         )
         parser.add_argument(
             "--no-periodic",

@@ -80,8 +80,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--delay",
             type=float,
-            default=0.5,
-            help="Task runner loop delay [default=0.5]",
+            default=1.0,
+            help="Task runner loop delay [default=1.0]",
         )
         parser.add_argument(
             "--no-periodic",

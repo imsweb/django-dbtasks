@@ -1,5 +1,7 @@
+import logging
 import traceback
 import uuid
+from typing import TYPE_CHECKING
 
 from django.core.exceptions import SuspiciousOperation
 from django.db import models
@@ -9,10 +11,16 @@ from django.tasks import (
     TaskContext,
     TaskResult,
     TaskResultStatus,
+    task_backends,
 )
 from django.tasks.base import TaskError
 from django.utils import timezone
 from django.utils.module_loading import import_string
+
+if TYPE_CHECKING:
+    from .backend import DatabaseBackend
+
+logger = logging.getLogger(__name__)
 
 
 def new_task_id():
@@ -43,6 +51,7 @@ class ScheduledTask(models.Model):
     queue = models.CharField(max_length=32, default=DEFAULT_TASK_QUEUE_NAME)
     backend = models.CharField(max_length=32)
     run_after = models.DateTimeField(null=True, blank=True)
+    delete_after = models.DateTimeField(null=True, blank=True)
 
     periodic = models.BooleanField(default=False)
 
@@ -72,6 +81,10 @@ class ScheduledTask(models.Model):
         return str(self.pk)
 
     @property
+    def task_backend(self) -> "DatabaseBackend":
+        return task_backends[self.backend]
+
+    @property
     def task(self) -> Task:
         task = import_string(self.task_path)
 
@@ -88,7 +101,7 @@ class ScheduledTask(models.Model):
         )
 
     @property
-    def result(self):
+    def result(self) -> TaskResult:
         errors = []
         if self.exception_path and self.status == TaskResultStatus.FAILED:
             errors.append(
@@ -115,6 +128,9 @@ class ScheduledTask(models.Model):
         return r
 
     def run(self):
+        """
+        Runs the task, passing `args`, `kwargs`, and a `TaskContext` if requested.
+        """
         if self.task.takes_context:
             return self.task.call(
                 TaskContext(task_result=self.result),
@@ -125,18 +141,37 @@ class ScheduledTask(models.Model):
             return self.task.call(*self.args, **self.kwargs)
 
     def run_and_update(self) -> TaskResultStatus:
+        """
+        Executes the task (on the current thread) and sets the status and related fields
+        accordingly. The `status` and `finished_at` fields are always updated.
+        `return_value` is set upon success, while `exception_path` and `traceback` are
+        set upon failure. `delete_after` is set if a retention period is set for the
+        task (which is added to `finished_at`).
+        """
         fields = ["finished_at", "status"]
+
         try:
             self.return_value = self.run()
-            self.finished_at = timezone.now()
             self.status = TaskResultStatus.SUCCESSFUL
-            self.save(update_fields=fields + ["return_value"])
+            fields.append("return_value")
         except Exception as ex:
             self.exception_path = (
                 f"{ex.__class__.__module__}.{ex.__class__.__qualname__}"
             )
             self.traceback = "".join(traceback.format_exception(ex))
-            self.finished_at = timezone.now()
             self.status = TaskResultStatus.FAILED
-            self.save(update_fields=fields + ["exception_path", "traceback"])
+            fields.extend(["exception_path", "traceback"])
+
+        self.finished_at = timezone.now()
+
+        try:
+            retain = self.task_backend.get_retention(self.task_path)
+            if retain is not None:
+                self.delete_after = self.finished_at + retain
+                fields.append("delete_after")
+        except Exception:
+            # Log this loudly, but don't fail.
+            logger.exception(f"Could not set `delete_after` for {self}")
+
+        self.save(update_fields=fields)
         return self.status

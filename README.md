@@ -57,16 +57,7 @@ t.join()
 
 ## Periodic Tasks
 
-As shown in the [quickstart](#quickstart), periodic tasks are specified as a mapping in the backend `OPTIONS` under the `periodic` key. The keys of the mapping should be dotted paths to the tasks, and the values should either be a string in [crontab format](https://crontab.guru), or an instance of `dbtasks.Periodic`. Using a `dbtasks.Periodic` allows you to specify `args` and `kwargs` (as values or callables) that will be passed to the task. For example, the `Runner` registers a periodic task to remove old tasks past the retention window, in a manner similar to:
-
-```python
-# Convert the `timedelta` to seconds, so as to be JSON-serializable.
-retain_secs = int(self.backend.options["retain"].total_seconds())
-# Clear old tasks every hour, on a random minute.
-self.periodic["dbtasks.runner.cleanup"] = Periodic("~ * * * *", args=[retain_secs])
-```
-
-_Note that this allows you to specify a custom `Periodic` for the `dbtasks.runner.cleanup` task in your `TASKS` setting if necessary._
+As shown in the [quickstart](#quickstart), periodic tasks are specified as a mapping in the backend `OPTIONS` under the `periodic` key. The keys of the mapping should be dotted paths to the tasks, and the values should either be a string in [crontab format](https://crontab.guru), or an instance of `dbtasks.Periodic`. Using a `dbtasks.Periodic` allows you to specify `args` and `kwargs` (as values or callables) that will be passed to the task, along with a custom `retain` duration.
 
 
 ## Logging

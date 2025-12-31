@@ -245,7 +245,7 @@ class Every(Schedule):
     def __init__(self, period: str | int | timedelta, start: datetime | None = None):
         self.period = Duration(period)
         self.period_seconds = int(self.period.total_seconds())
-        self.start = start or datetime.now()
+        self.start = start or datetime.now().replace(microsecond=0)
         self.start_timestamp = int(self.start.timestamp())
 
     def __repr__(self):

@@ -1,6 +1,12 @@
-from django.tasks import TaskResult, TaskResultStatus
+import copy
+
+from django.conf import settings
+from django.tasks import TaskResult, TaskResultStatus, default_task_backend
+from django.test import TestCase, override_settings
 
 from dbtasks.models import ScheduledTask
+from dbtasks.periodic import Periodic
+from dbtasks.schedule import Duration
 
 from ..tasks import kaboom, maintenance, send_mail
 from ..utils import LoggedRunnerTestCase
@@ -12,10 +18,16 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
         self.assertTrue(self.runner.wait_for(result))
         self.assertEqual(result.status, TaskResultStatus.SUCCESSFUL)
         self.assertEqual(result.return_value, {"sent": True})
+        # The send_mail task retention is set to 0, so it should be deleted immediately.
+        t = ScheduledTask.objects.get(pk=result.id)
+        self.assertEqual(t.finished_at, t.delete_after)
         self.assertEqual(
             self.task_logs,
             {"INFO": ["Sending mail to user@example.com: hello world!"]},
         )
+        self.runner.delete_tasks()
+        with self.assertRaises(ScheduledTask.DoesNotExist):
+            t.refresh_from_db()
 
     def test_lots_of_tasks(self):
         expected = set()
@@ -27,6 +39,8 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
 
     def test_periodic(self):
         self.assertIn(maintenance.module_path, self.runner.periodic)
+        # No retention period is set by default.
+        self.assertIsNone(self.runner.backend.get_retention(maintenance.module_path))
         self.runner.init_periodic()
         first = ScheduledTask.objects.get(
             task_path=maintenance.module_path,
@@ -71,3 +85,39 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
             result.return_value
         self.assertEqual(len(result.errors), 1)
         self.assertEqual(result.errors[0].exception_class_path, "builtins.ValueError")
+
+
+def opts(**options):
+    tasks = copy.deepcopy(settings.TASKS)
+    tasks["default"]["OPTIONS"].update(options)
+    return tasks
+
+
+class DefaultRetainTest(TestCase):
+    @override_settings(TASKS=opts(retain="14d"))
+    def test_default_retain(self):
+        self.assertEqual(
+            default_task_backend.get_retention("tests.tasks.maintenance"),
+            Duration("14d"),
+        )
+
+    @override_settings(TASKS=opts(retain={"tests.tasks.maintenance": "30d"}))
+    def test_custom_retain(self):
+        self.assertEqual(
+            default_task_backend.get_retention("tests.tasks.maintenance"),
+            Duration("30d"),
+        )
+
+    @override_settings(
+        TASKS=opts(
+            retain="30d",
+            periodic={
+                "tests.tasks.maintenance": Periodic("24h", retain="7d"),
+            },
+        )
+    )
+    def test_custom_periodic(self):
+        self.assertEqual(
+            default_task_backend.get_retention("tests.tasks.maintenance"),
+            Duration("7d"),
+        )

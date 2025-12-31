@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from django.tasks import Task, TaskResult, TaskResultStatus
@@ -9,6 +10,8 @@ from django.utils import timezone
 from django.utils.json import normalize_json
 
 from .models import ScheduledTask
+from .periodic import Periodic
+from .schedule import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,24 @@ class DatabaseBackend(BaseTaskBackend):
         `immediate=True`).
         """
         return f"{type(self).__module__}.{type(self).__qualname__}"
+
+    def get_retention(self, task_name: str) -> Duration | None:
+        """
+        Returns the retention period for the specified `task_name`, or `None` if there
+        is none defined (in which case it should be retained indefinitely).
+        """
+        # Special case for periodic tasks with a specific retention.
+        if periodic := self.options.get("periodic"):
+            if spec := periodic.get(task_name):
+                if isinstance(spec, Periodic) and spec.retain is not None:
+                    return spec.retain
+        retain = self.options.get("retain")
+        if retain is None:
+            return None
+        elif isinstance(retain, Mapping):
+            value = retain.get(task_name)
+            return None if value is None else Duration(value)
+        return Duration(retain)
 
     def validate_task(self, task):
         super().validate_task(task)
