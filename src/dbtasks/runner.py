@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.utils.module_loading import import_string
 
 from .backend import DatabaseBackend
+from .defaults import DEFAULT_RUNNER_LOOP_DELAY
 from .models import ScheduledTask
 from .periodic import Periodic
 
@@ -51,7 +52,7 @@ class Runner:
         workers: int = 4,
         worker_id: str | None = None,
         backend: str = DEFAULT_TASK_BACKEND_ALIAS,
-        loop_delay: float = 1.0,
+        loop_delay: float = DEFAULT_RUNNER_LOOP_DELAY,
         init_periodic: bool = True,
     ):
         self.workers = workers
@@ -217,13 +218,15 @@ class Runner:
         """
         Deletes any finished tasks scheduled for deletion before now.
         """
-        return ScheduledTask.objects.filter(
+        deleted = ScheduledTask.objects.filter(
             delete_after__lt=timezone.now(),
             status__in=[TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED],
             # TODO: allow runner to specify which backend/queues to process
             backend=self.backend.alias,
             queue__in=self.backend.queues,
-        ).delete()
+        ).delete()[0]
+        if deleted:
+            logger.debug(f"Removed {deleted} completed task(s)")
 
     def init_periodic(self):
         """

@@ -4,6 +4,7 @@ import platform
 from django.core.management import BaseCommand, CommandParser
 from django.tasks import DEFAULT_TASK_BACKEND_ALIAS
 
+from dbtasks.defaults import DEFAULT_RUNNER_LOOP_DELAY
 from dbtasks.runner import Runner
 
 
@@ -38,8 +39,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--delay",
             type=float,
-            default=1.0,
-            help="Loop delay [default=1.0]",
+            default=DEFAULT_RUNNER_LOOP_DELAY,
+            help=f"Loop delay [default={DEFAULT_RUNNER_LOOP_DELAY}]",
         )
         parser.add_argument(
             "--no-periodic",

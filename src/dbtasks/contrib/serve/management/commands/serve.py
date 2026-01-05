@@ -8,6 +8,8 @@ from django.conf import settings
 from django.core.management import BaseCommand
 from django.tasks import DEFAULT_TASK_BACKEND_ALIAS
 
+from dbtasks.defaults import DEFAULT_RUNNER_LOOP_DELAY
+
 try:
     from granian import Granian
     from granian.constants import Interfaces
@@ -80,8 +82,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--delay",
             type=float,
-            default=1.0,
-            help="Task runner loop delay [default=1.0]",
+            default=DEFAULT_RUNNER_LOOP_DELAY,
+            help=f"Task runner loop delay [default={DEFAULT_RUNNER_LOOP_DELAY}]",
         )
         parser.add_argument(
             "--no-periodic",
