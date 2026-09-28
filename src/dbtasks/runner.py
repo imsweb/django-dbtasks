@@ -282,6 +282,8 @@ class Runner:
                     backoff = max(backoff / 2.0, 1.0)
                 except Exception:
                     logger.exception(f"Exception in Runner.run() - sleeping {backoff}s")
+                    # Force a reconnect next time around.
+                    connection.close()
                     time.sleep(backoff)
                     # Wait for up to about a minute.
                     backoff = min(backoff * 2.0, 64.0)
