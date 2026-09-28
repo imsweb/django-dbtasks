@@ -1,7 +1,7 @@
 import random
 import re
+from collections.abc import Iterator
 from datetime import datetime, timedelta
-from typing import Iterator
 
 
 class ScheduleExhausted(Exception):
@@ -142,7 +142,7 @@ class CrontabParser:
             if num in values:
                 values.discard(num)
                 values.add(repl)
-        return list(sorted(values))
+        return sorted(values)
 
 
 minute = CrontabParser(0, 59)
@@ -236,7 +236,7 @@ class Duration(timedelta):
         for fmt, sec in Duration.SPECS.items():
             num = int(seconds // sec)
             if num > 0:
-                duration.append("{}{}".format(num, fmt))
+                duration.append(f"{num}{fmt}")
                 seconds -= num * sec
         return "".join(duration)
 
@@ -249,7 +249,7 @@ class Every(Schedule):
         self.start_timestamp = int(self.start.timestamp())
 
     def __repr__(self):
-        return "period({})".format(repr(self.period.duration_string()))
+        return f"period({self.period.duration_string()!r})"
 
     def match(self, dt: datetime) -> bool:
         return (int(dt.timestamp()) - self.start_timestamp) % self.period_seconds == 0

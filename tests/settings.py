@@ -11,7 +11,7 @@ match os.getenv("TEST_ENGINE"):
                 "USER": os.getenv("POSTGRES_USER", "postgres"),
                 "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
                 "HOST": os.getenv("POSTGRES_HOST", "localhost"),
-                "PORT": os.getenv("POSTGRES_PORT", 5432),
+                "PORT": os.getenv("POSTGRES_PORT", "5432"),
             }
         }
     case "mysql":
@@ -22,7 +22,7 @@ match os.getenv("TEST_ENGINE"):
                 "USER": os.getenv("MYSQL_USER", "root"),
                 "PASSWORD": os.getenv("MYSQL_PASSWORD", ""),
                 "HOST": os.getenv("MYSQL_HOST", "localhost"),
-                "PORT": os.getenv("MYSQL_PORT", 3306),
+                "PORT": os.getenv("MYSQL_PORT", "3306"),
             }
         }
     case _:

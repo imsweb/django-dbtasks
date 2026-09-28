@@ -68,7 +68,9 @@ class DatabaseBackend(BaseTaskBackend):
         if self.immediate and task.run_after is not None:
             raise InvalidTask("Backend does not support run_after in immediate mode.")
 
-    def enqueue(self, task: Task, args: list[Any], kwargs: dict[str, Any]):
+    def enqueue(
+        self, task: Task, args: list[Any], kwargs: dict[str, Any]
+    ) -> TaskResult:
         self.validate_task(task)
 
         scheduled = ScheduledTask.objects.create(
@@ -103,7 +105,7 @@ class DatabaseBackend(BaseTaskBackend):
 
         return scheduled.result
 
-    def get_result(self, result_id) -> TaskResult:
+    def get_result(self, result_id: Any) -> TaskResult:
         try:
             return ScheduledTask.objects.get(pk=result_id).result
         except ScheduledTask.DoesNotExist:

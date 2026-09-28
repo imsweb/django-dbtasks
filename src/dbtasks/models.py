@@ -154,7 +154,7 @@ class ScheduledTask(models.Model):
             self.return_value = self.run()
             self.status = TaskResultStatus.SUCCESSFUL
             fields.append("return_value")
-        except Exception as ex:
+        except Exception as ex:  # noqa
             self.exception_path = (
                 f"{ex.__class__.__module__}.{ex.__class__.__qualname__}"
             )

@@ -134,7 +134,7 @@ class Runner:
         try:
             status = fut.result()
             logger.info(f"Task {task} finished with status {status}")
-        except Exception as ex:
+        except Exception as ex:  # noqa
             logger.info(f"Task {task} raised {ex}")
 
         if task.periodic and (schedule := self.periodic.get(task.task_path)):
@@ -256,8 +256,12 @@ class Runner:
         Schedules and executes tasks until `stop()` is called.
         """
         logger.info(f"Starting task runner with {self.workers} workers")
+        # Reset the processed count and clear the event signals.
         self.processed = 0
+        self.ready.clear()
         self.stopsign.clear()
+        self.finished.clear()
+        self.empty.clear()
         if self.should_init_periodic:
             with transaction.atomic(durable=True):
                 self.init_periodic()
@@ -265,13 +269,22 @@ class Runner:
         else:
             self.ready.set()
         try:
+            backoff = 1.0
             while not self.stopsign.is_set():
-                if delay := self.schedule_tasks():
-                    time.sleep(delay)
-                    # Only process deletes when not running through full batches (and
-                    # when the flag is set - mostly for testing).
-                    if self.should_delete_tasks:
-                        self.delete_tasks()
+                try:
+                    if delay := self.schedule_tasks():
+                        time.sleep(delay)
+                        # Only process deletes when not running through full batches
+                        # (and when the flag is set - mostly for testing).
+                        if self.should_delete_tasks:
+                            self.delete_tasks()
+                    # Scale down the runloop backoff each time we successfully schedule.
+                    backoff = max(backoff / 2.0, 1.0)
+                except Exception:
+                    logger.exception(f"Exception in Runner.run() - sleeping {backoff}s")
+                    time.sleep(backoff)
+                    # Wait for up to about a minute.
+                    backoff = min(backoff * 2.0, 64.0)
         except KeyboardInterrupt:
             pass
         finally:

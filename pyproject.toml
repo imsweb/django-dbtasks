@@ -1,6 +1,6 @@
 [project]
 name = "django-dbtasks"
-version = "0.4.0"
+version = "0.5.0.dev0"
 description = "Database task backend and runner for Django tasks."
 readme = "README.md"
 authors = [
@@ -11,7 +11,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Django :: 6",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
 ]
@@ -41,3 +40,10 @@ module-name = "dbtasks"
 
 [tool.ruff.lint]
 extend-select = ["I"]
+ignore = [
+    "DTZ001",
+    "DTZ005",
+    "DTZ006",
+    "RUF012", # mutable-class-default
+    "SIM102", # collapsible-if
+]

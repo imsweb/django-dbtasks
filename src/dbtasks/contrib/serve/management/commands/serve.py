@@ -28,7 +28,7 @@ class Command(BaseCommand):
     help = "Web server and task runner."
 
     def add_arguments(self, parser):
-        default_workers = int(os.getenv("GRANIAN_WORKERS", 1))
+        default_workers = int(os.getenv("GRANIAN_WORKERS", "1"))
         default_threads = int(os.getenv("GRANIAN_BLOCKING_THREADS", max(1, cpus())))
         default_node = platform.node() or "taskrunner"
         default_task_threads = default_threads // 2

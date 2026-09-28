@@ -82,7 +82,7 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
         self.assertTrue(self.runner.wait_for(result))
         self.assertEqual(result.status, TaskResultStatus.FAILED)
         with self.assertRaises(ValueError):
-            result.return_value
+            _ = result.return_value
         self.assertEqual(len(result.errors), 1)
         self.assertEqual(result.errors[0].exception_class_path, "builtins.ValueError")
 
