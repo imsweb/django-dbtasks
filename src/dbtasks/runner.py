@@ -173,15 +173,17 @@ class Runner:
             task.worker_ids.append(self.worker_id)
             task.save(update_fields=["status", "started_at", "worker_ids"])
         logger.debug(f"Submitting {task} for execution")
+        # This property can raise an exception, so do it early before we signal/submit.
+        result = task.result
         if self.backend.send_signals:
-            task_started.send(type(self.backend), task_result=task.result)
+            task_started.send(type(self.backend), task_result=result)
         f = self.executor.submit(run_task, task)
         with self.lock:
             # Keep track of task modules we've seen, so we can reload them.
             self.seen_modules.add(task.task_path.rsplit(".", 1)[0])
             self.tasks[task.task_id] = f
         f.add_done_callback(functools.partial(self.task_done, task))
-        return task.result
+        return result
 
     def schedule_tasks(self) -> float:
         """
@@ -206,7 +208,13 @@ class Runner:
 
         for t in tasks:
             # get_tasks starts all of the returned tasks atomically, no need to here.
-            self.submit_task(t, start=False)
+            try:
+                self.submit_task(t, start=False)
+            except Exception as ex:  # noqa
+                fields = set()
+                fields.update(t.fail(ex))
+                fields.update(t.finish())
+                t.save(update_fields=fields)
 
         if len(tasks) >= available:
             # We got a full batch, try again immediately.

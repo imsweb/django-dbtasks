@@ -2,6 +2,7 @@ import logging
 import traceback
 import uuid
 from typing import TYPE_CHECKING
+import datetime
 
 from django.core.exceptions import SuspiciousOperation
 from django.db import models
@@ -140,6 +141,33 @@ class ScheduledTask(models.Model):
         else:
             return self.task.call(*self.args, **self.kwargs)
 
+    def fail(self, ex: Exception) -> set[str]:
+        """
+        Marks the task as FAILED and sets the exception path and formatted traceback.
+        Returns the fields that need to be saved.
+        """
+        self.exception_path = f"{ex.__class__.__module__}.{ex.__class__.__qualname__}"
+        self.traceback = "".join(traceback.format_exception(ex))
+        self.status = TaskResultStatus.FAILED
+        return {"exception_path", "traceback", "status"}
+
+    def finish(self, at: datetime.datetime | None = None) -> set[str]:
+        """
+        Sets `finished_at`, and if the task has a retention period, also sets
+        `delete_after`. Returns the fields that need to be saved.
+        """
+        updated = {"finished_at"}
+        self.finished_at = at or timezone.now()
+        try:
+            retain = self.task_backend.get_retention(self.task_path)
+            if retain is not None:
+                self.delete_after = self.finished_at + retain
+                updated.add("delete_after")
+        except Exception:
+            # Log this loudly, but don't fail.
+            logger.exception(f"Could not set `delete_after` for {self}")
+        return updated
+
     def run_and_update(self) -> TaskResultStatus:
         """
         Executes the task (on the current thread) and sets the status and related fields
@@ -148,30 +176,16 @@ class ScheduledTask(models.Model):
         set upon failure. `delete_after` is set if a retention period is set for the
         task (which is added to `finished_at`).
         """
-        fields = ["finished_at", "status"]
+        fields = set()
 
         try:
             self.return_value = self.run()
             self.status = TaskResultStatus.SUCCESSFUL
-            fields.append("return_value")
+            fields.update({"return_value", "status"})
         except Exception as ex:  # noqa
-            self.exception_path = (
-                f"{ex.__class__.__module__}.{ex.__class__.__qualname__}"
-            )
-            self.traceback = "".join(traceback.format_exception(ex))
-            self.status = TaskResultStatus.FAILED
-            fields.extend(["exception_path", "traceback"])
+            fields.update(self.fail(ex))
 
-        self.finished_at = timezone.now()
-
-        try:
-            retain = self.task_backend.get_retention(self.task_path)
-            if retain is not None:
-                self.delete_after = self.finished_at + retain
-                fields.append("delete_after")
-        except Exception:
-            # Log this loudly, but don't fail.
-            logger.exception(f"Could not set `delete_after` for {self}")
+        fields.update(self.finish())
 
         self.save(update_fields=fields)
         return self.status
