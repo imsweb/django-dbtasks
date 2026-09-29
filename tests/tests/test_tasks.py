@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 
 from dbtasks.models import ScheduledTask
 from dbtasks.periodic import Periodic
+from dbtasks.runner import DuplicateWorker, Runner
 from dbtasks.schedule import Duration
 
 from ..tasks import kaboom, maintenance, send_mail
@@ -13,6 +14,10 @@ from ..utils import LoggedRunnerTestCase
 
 
 class ScheduledTaskTests(LoggedRunnerTestCase):
+    def test_duplicate_worker(self):
+        with self.assertRaises(DuplicateWorker):
+            Runner(worker_id=self.id()).run()
+
     def test_single_task(self):
         result: TaskResult = send_mail.enqueue("user@example.com", "hello world!")
         self.assertTrue(self.runner.wait_for(result))

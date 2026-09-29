@@ -21,10 +21,14 @@ from django.utils.module_loading import import_string
 
 from .backend import DatabaseBackend
 from .defaults import DEFAULT_RUNNER_LOOP_DELAY
-from .models import ScheduledTask
+from .models import ScheduledTask, Worker
 from .periodic import Periodic
 
 logger = logging.getLogger(__name__)
+
+
+class DuplicateWorker(Exception):
+    pass
 
 
 def run_task(task: ScheduledTask) -> TaskResultStatus:
@@ -113,8 +117,9 @@ class Runner:
                 t.status = TaskResultStatus.RUNNING
                 t.started_at = now
                 # TODO: can't figure out how to do this in a .update call.
+                t.worker_id = self.worker_id
                 t.worker_ids.append(self.worker_id)
-                t.save(update_fields=["status", "started_at", "worker_ids"])
+                t.save(update_fields=["status", "started_at", "worker", "worker_ids"])
         return tasks
 
     def task_done(
@@ -170,8 +175,9 @@ class Runner:
         if start:
             task.status = TaskResultStatus.RUNNING
             task.started_at = timezone.now()
+            task.worker_id = self.worker_id
             task.worker_ids.append(self.worker_id)
-            task.save(update_fields=["status", "started_at", "worker_ids"])
+            task.save(update_fields=["status", "started_at", "worker", "worker_ids"])
         logger.debug(f"Submitting {task} for execution")
         # This property can raise an exception, so do it early before we signal/submit.
         result = task.result
@@ -263,19 +269,40 @@ class Runner:
         """
         Schedules and executes tasks until `stop()` is called.
         """
-        logger.info(f"Starting task runner with {self.workers} workers")
+        logger.info(
+            f"Starting task runner {self.worker_id} with {self.workers} workers"
+        )
+
         # Reset the processed count and clear the event signals.
         self.processed = 0
         self.ready.clear()
         self.stopsign.clear()
         self.finished.clear()
         self.empty.clear()
+
+        try:
+            worker = Worker.objects.get(pk=self.worker_id)
+            if worker.is_active:
+                raise DuplicateWorker(self.worker_id)
+        except Worker.DoesNotExist:
+            worker = Worker.objects.create(
+                pk=self.worker_id,
+                backend=self.backend.alias,
+            )
+
+        # Restart tasks left in the RUNNING state from last time.
+        worker.tasks.filter(status=TaskResultStatus.RUNNING).update(
+            status=TaskResultStatus.READY,
+            started_at=None,
+        )
+
         if self.should_init_periodic:
             with transaction.atomic(durable=True):
                 self.init_periodic()
                 transaction.on_commit(self.ready.set)
         else:
             self.ready.set()
+
         try:
             backoff = 1.0
             while not self.stopsign.is_set():
@@ -286,8 +313,10 @@ class Runner:
                         # (and when the flag is set - mostly for testing).
                         if self.should_delete_tasks:
                             self.delete_tasks()
+                    # Update `worker.last_seen` if necessary.
+                    worker.heartbeat()
                     # Scale down the runloop backoff each time we successfully schedule.
-                    backoff = max(backoff / 2.0, 1.0)
+                    backoff = max(backoff / 4.0, 1.0)
                 except Exception:
                     logger.exception(f"Exception in Runner.run() - sleeping {backoff}s")
                     # Force a reconnect next time around.
@@ -299,7 +328,9 @@ class Runner:
             pass
         finally:
             self.executor.shutdown()
+            worker.delete()
             connection.close()
+
         self.ready.clear()
         self.finished.set()
 

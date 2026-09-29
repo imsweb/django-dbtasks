@@ -2,7 +2,12 @@ from django.contrib import admin
 from django.tasks import TaskResultStatus
 from django.utils import timezone
 
-from .models import ScheduledTask
+from .models import ScheduledTask, Worker
+
+
+@admin.register(Worker)
+class WorkerAdmin(admin.ModelAdmin):
+    list_display = ["id", "backend", "first_seen", "last_seen"]
 
 
 @admin.register(ScheduledTask)

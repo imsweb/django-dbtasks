@@ -46,4 +46,5 @@ ignore = [
     "DTZ006",
     "RUF012", # mutable-class-default
     "SIM102", # collapsible-if
+    "SIM117", # multiple-with-statements
 ]

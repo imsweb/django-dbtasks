@@ -38,7 +38,22 @@ class DatabaseBackend(BaseTaskBackend):
         return bool(self.options.get("signals", True))
 
     @property
-    def worker_id(self):
+    def worker_timeout(self) -> float:
+        """
+        The amount of time (in seconds) before a worker is considered dead.
+        """
+        return float(self.options.get("worker_timeout", 60.0))
+
+    @property
+    def heartbeat(self) -> float:
+        """
+        The amount of time (in seconds) between worker heartbeats. Defaults to
+        `worker_timeout / 4.0`.
+        """
+        return self.worker_timeout / 4.0
+
+    @property
+    def worker_id(self) -> str:
         """
         The `worker_id` to record when tasks are run by the backend itself (i.e. when
         `immediate=True`).

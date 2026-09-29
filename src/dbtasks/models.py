@@ -1,12 +1,13 @@
+import datetime
 import logging
 import traceback
 import uuid
 from typing import TYPE_CHECKING
-import datetime
 
 from django.core.exceptions import SuspiciousOperation
 from django.db import models
 from django.tasks import (
+    DEFAULT_TASK_BACKEND_ALIAS,
     DEFAULT_TASK_QUEUE_NAME,
     Task,
     TaskContext,
@@ -26,9 +27,36 @@ logger = logging.getLogger(__name__)
 
 def new_task_id():
     try:
+        # Prefer time-ordered UUIDs, if available.
         return uuid.uuid7()
     except AttributeError:
         return uuid.uuid4()
+
+
+class Worker(models.Model):
+    id = models.CharField(max_length=200, primary_key=True)
+    backend = models.CharField(max_length=32, default=DEFAULT_TASK_BACKEND_ALIAS)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+
+    @property
+    def task_backend(self) -> "DatabaseBackend":
+        return task_backends[self.backend]
+
+    @property
+    def last_seen_seconds(self) -> float:
+        return (timezone.now() - self.last_seen).total_seconds()
+
+    @property
+    def is_active(self) -> bool:
+        return self.last_seen_seconds < self.task_backend.worker_timeout
+
+    def heartbeat(self) -> bool:
+        if self.last_seen_seconds >= self.task_backend.heartbeat:
+            self.last_seen = timezone.now()
+            self.save(update_fields=["last_seen"])
+            return True
+        return False
 
 
 class ScheduledTask(models.Model):
@@ -50,12 +78,19 @@ class ScheduledTask(models.Model):
     task_path = models.TextField()
     priority = models.IntegerField(default=0)
     queue = models.CharField(max_length=32, default=DEFAULT_TASK_QUEUE_NAME)
-    backend = models.CharField(max_length=32)
+    backend = models.CharField(max_length=32, default=DEFAULT_TASK_BACKEND_ALIAS)
     run_after = models.DateTimeField(null=True, blank=True)
     delete_after = models.DateTimeField(null=True, blank=True)
 
     periodic = models.BooleanField(default=False)
 
+    worker = models.ForeignKey(
+        Worker,
+        on_delete=models.SET_NULL,
+        related_name="tasks",
+        null=True,
+        blank=True,
+    )
     worker_ids = models.JSONField(default=list, blank=True)
 
     return_value = models.JSONField(default=None, null=True)
