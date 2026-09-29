@@ -280,21 +280,25 @@ class Runner:
         self.finished.clear()
         self.empty.clear()
 
-        try:
-            worker = Worker.objects.get(pk=self.worker_id)
-            if worker.is_active:
-                raise DuplicateWorker(self.worker_id)
-        except Worker.DoesNotExist:
-            worker = Worker.objects.create(
-                pk=self.worker_id,
-                backend=self.backend.alias,
+        with transaction.atomic(durable=True):
+            try:
+                worker = Worker.objects.select_for_update().get(pk=self.worker_id)
+                if worker.is_active:
+                    raise DuplicateWorker(self.worker_id)
+            except Worker.DoesNotExist:
+                worker = Worker.objects.create(
+                    pk=self.worker_id,
+                    backend=self.backend.alias,
+                )
+            # Restart orphaned tasks left in the RUNNING state.
+            ScheduledTask.objects.filter(
+                Q(worker=worker) | Q(worker__isnull=True),
+                status=TaskResultStatus.RUNNING,
+            ).select_for_update().update(
+                status=TaskResultStatus.READY,
+                started_at=None,
+                worker=None,
             )
-
-        # Restart tasks left in the RUNNING state from last time.
-        worker.tasks.filter(status=TaskResultStatus.RUNNING).update(
-            status=TaskResultStatus.READY,
-            started_at=None,
-        )
 
         if self.should_init_periodic:
             with transaction.atomic(durable=True):
