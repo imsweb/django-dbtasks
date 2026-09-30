@@ -39,6 +39,9 @@ class Worker(models.Model):
     first_seen = models.DateTimeField(default=timezone.now)
     last_seen = models.DateTimeField(default=timezone.now)
 
+    def __str__(self):
+        return self.id
+
     @property
     def task_backend(self) -> "DatabaseBackend":
         return task_backends[self.backend]
@@ -211,7 +214,8 @@ class ScheduledTask(models.Model):
         set upon failure. `delete_after` is set if a retention period is set for the
         task (which is added to `finished_at`).
         """
-        fields = set()
+        fields = {"worker"}
+        self.worker = None
 
         try:
             self.return_value = self.run()

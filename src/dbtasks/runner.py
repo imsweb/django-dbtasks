@@ -73,6 +73,8 @@ class Runner:
         self.backend = task_backends[backend]
         if not isinstance(self.backend, DatabaseBackend):
             raise ImproperlyConfigured("Backend must be a `DatabaseBackend`")
+        if self.backend.immediate:
+            raise ImproperlyConfigured("Backend is in immediate mode!")
         # Signaled when the runner is ready and processing tasks.
         self.ready = threading.Event()
         # Signaled when the runner should stop.

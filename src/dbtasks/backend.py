@@ -22,7 +22,7 @@ class DatabaseBackend(BaseTaskBackend):
     supports_priority = True
 
     @property
-    def immediate(self):
+    def immediate(self) -> bool:
         """
         Whether tasks should be executed immediately by the backend. Useful when testing
         without having to run a worker.
@@ -30,7 +30,7 @@ class DatabaseBackend(BaseTaskBackend):
         return bool(self.options.get("immediate", False))
 
     @property
-    def send_signals(self):
+    def send_signals(self) -> bool:
         """
         Whether the `task_enqueued`, `task_started`, and `task_finished` should be sent
         when executing tasks with this backend. Defaults to `True`.
