@@ -9,7 +9,7 @@ from dbtasks.periodic import Periodic
 from dbtasks.runner import DuplicateWorker, Runner
 from dbtasks.schedule import Duration
 
-from ..tasks import kaboom, maintenance, send_mail
+from ..tasks import async_task, kaboom, maintenance, send_mail
 from ..utils import LoggedRunnerTestCase
 
 
@@ -33,6 +33,24 @@ class ScheduledTaskTests(LoggedRunnerTestCase):
         self.runner.delete_tasks()
         with self.assertRaises(ScheduledTask.DoesNotExist):
             t.refresh_from_db()
+
+    def test_async_task(self):
+        result: TaskResult = async_task.enqueue("hello world!")
+        self.assertTrue(self.runner.wait_for(result))
+        self.assertEqual(result.status, TaskResultStatus.SUCCESSFUL)
+        self.assertEqual(result.return_value, {"id": result.id, "arg": "hello world!"})
+
+    def test_async_tasks(self):
+        expected = {}
+        results = []
+        for k in range(100):
+            result: TaskResult = async_task.enqueue(k)
+            expected[result.id] = {"id": result.id, "arg": k}
+            results.append(result)
+        self.runner.wait()
+        for r in results:
+            r.refresh()
+            self.assertEqual(r.return_value, expected[r.id])
 
     def test_lots_of_tasks(self):
         expected = set()

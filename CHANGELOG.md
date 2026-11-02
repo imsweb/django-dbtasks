@@ -1,3 +1,8 @@
+## 0.6.0 (TBD)
+
+* Support and test async tasks
+
+
 ## 0.5.0 (2026-10-21)
 
 * Catch exceptions during task scheduling (not just task execution), and retry with a backoff and a fresh database connection

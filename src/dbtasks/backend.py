@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 class DatabaseBackend(BaseTaskBackend):
     supports_defer = True
+    supports_async_task = True
     supports_get_result = True
     supports_priority = True
 

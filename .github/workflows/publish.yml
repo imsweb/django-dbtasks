@@ -15,6 +15,7 @@ jobs:
             url: https://pypi.org/p/django-dbtasks
         permissions:
             id-token: write
+            contents: write
         steps:
             - uses: actions/checkout@v7
             - name: Set up Python
@@ -25,3 +26,12 @@ jobs:
               run: uv build
             - name: Publish
               run: uv publish
+            - name: Create GitHub release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  VERSION=$(uv version --short)
+                  gh release create "v${VERSION}" dist/* \
+                    --target "$GITHUB_SHA" \
+                    --title "v${VERSION}" \
+                    --generate-notes

@@ -1,6 +1,8 @@
+import asyncio
 import logging
+from typing import Any
 
-from django.tasks import task
+from django.tasks import TaskContext, task
 
 logger = logging.getLogger(__name__)
 
@@ -19,3 +21,9 @@ def maintenance():
 @task
 def kaboom(msg: str):
     raise ValueError(msg)
+
+
+@task(takes_context=True)
+async def async_task(context: TaskContext, arg: Any):
+    await asyncio.sleep(0.01)
+    return {"id": context.task_result.id, "arg": arg}
